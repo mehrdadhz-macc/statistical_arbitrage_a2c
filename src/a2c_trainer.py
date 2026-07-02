@@ -84,8 +84,8 @@ def make_threshold_clone_rule(tau: float):
     from src.rewards import buy_reward, sell_reward
 
     def rule(ctx: dict) -> int:
-        r_buy = buy_reward(ctx["pa_t"], ctx["pdam"], ctx["pb_high"], ctx.get("pa_high", ctx["pa_low"]), ctx["pa_low"])
-        r_sell = sell_reward(ctx["pb_t"], ctx["pdam"], ctx["pa_low"], ctx["pb_high"], ctx.get("pb_low", ctx["pb_high"]))
+        r_buy = buy_reward(ctx["pa_t"], ctx["pdam"], ctx["pb_high"], ctx["pa_high"], ctx["pa_low"])
+        r_sell = sell_reward(ctx["pb_t"], ctx["pdam"], ctx["pa_low"], ctx["pb_high"], ctx["pb_low"])
         if r_buy > tau and ctx["vt"] < ctx["vmax"] and ctx["cum_bought"] < ctx["qhigh"]:
             return BUY
         if r_sell > tau and ctx["vt"] > ctx["vmin"] and ctx["cum_sold"] < ctx["qhigh"]:

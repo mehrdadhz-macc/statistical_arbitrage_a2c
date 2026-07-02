@@ -304,6 +304,8 @@ class ContractCIDEnv:
             "pb_t": self.filled_best_bid[i],
             "pdam": self.pdam,
             "pb_high": self.pb_high,
+            "pb_low": self.pb_low,
+            "pa_high": self.pa_high,
             "pa_low": self.pa_low,
             "vwap_hat": self.vwap_hat,
             "pfeed_bench": self.pfeed_bench,

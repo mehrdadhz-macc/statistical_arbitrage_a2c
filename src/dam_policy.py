@@ -77,8 +77,9 @@ def vwap_bench(
     delivery hour on the previous `lookback_days` calendar days.
 
     Only uses days strictly before `delivery_start` (no lookahead). Returns
-    None if none of the lookback days are available (e.g. start of the split),
-    in which case callers should fall back to a HOLD-equivalent direction.
+    None if none of the lookback days are available (e.g. the first ~2 days
+    of a split); `open_dam_position` below falls back to comparing pdam
+    against itself in that case, which still always opens a full position.
     """
     values = []
     for d in range(1, lookback_days + 1):
