@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Claude Code local settings
+.claude/
+
+# Data files (copied from reinforce_threshold_policy, not tracked)
+data/train/cim_order_book.csv
+data/test/cim_order_book.csv
+data/train/intraday_auction_curves.csv
+data/test/intraday_auction_curves.csv
+
+# Logs
+outputs/logs/
+
+# Generated outputs (models, plots, run artefacts)
+outputs/models/
+outputs/plots/
+outputs/eval_plots/
+outputs/runs/
+outputs/*.png
+outputs/data_plots/*.png
