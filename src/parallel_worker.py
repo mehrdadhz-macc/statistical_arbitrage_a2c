@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src import dam_policy
+from src import balancing, dam_policy
 from src.a2c_trainer import A2CAgent, build_worker_clone_rules
 from src.environment import ContractCIDEnv
 
@@ -32,14 +32,16 @@ from src.environment import ContractCIDEnv
 _g_cim_groups = None
 _g_auc = None
 _g_session_vwap: pd.Series | None = None
+_g_hourly_bal: pd.DataFrame | None = None
 
 
-def init_globals(cim: pd.DataFrame, auc: pd.DataFrame) -> None:
+def init_globals(cim: pd.DataFrame, auc: pd.DataFrame, bal: pd.DataFrame | None = None) -> None:
     """Call once in the parent process before creating the worker Pool."""
-    global _g_cim_groups, _g_auc, _g_session_vwap
+    global _g_cim_groups, _g_auc, _g_session_vwap, _g_hourly_bal
     _g_cim_groups = cim.groupby("delivery_start")
     _g_auc = auc
     _g_session_vwap = dam_policy.precompute_session_mid_vwap(cim)
+    _g_hourly_bal = balancing.precompute_hourly_bal(bal) if bal is not None else None
 
 
 def _build_env_for_contract(
@@ -62,10 +64,20 @@ def _build_env_for_contract(
         pdam, vwap_hat, env_kwargs["vmax"], env_kwargs["vmin"]
     )
 
+    ptake, pfeed = None, None
+    pfeed_bench, ptake_bench, neighbor_ptake_bench = None, None, None
+    if _g_hourly_bal is not None:
+        ptake, pfeed = balancing.contract_bal_prices(_g_hourly_bal, delivery_start)
+        ptake_bench, pfeed_bench = balancing.bal_bench(_g_hourly_bal, delivery_start)
+        neighbor_ptake_bench = balancing.rolling_neighbor_ptake(_g_hourly_bal, delivery_start)
+
     env = ContractCIDEnv(**env_kwargs)
     state, mask = env.reset(
         cim_contract, pdam=pdam, v0=v0, c_dam=c_dam,
-        vwap_hat=vwap_hat, neighbor_bench=vwap_hat,
+        vwap_hat=vwap_hat,
+        pfeed_bench=pfeed_bench, ptake_bench=ptake_bench,
+        neighbor_ptake_bench=neighbor_ptake_bench,
+        ptake=ptake, pfeed=pfeed,
     )
     return env, state, mask
 

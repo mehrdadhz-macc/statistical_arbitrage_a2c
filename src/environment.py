@@ -20,17 +20,20 @@ depth walk.
 
 Reward: src.rewards.{buy_reward,sell_reward,hold_reward} (Eqs. 5-7).
 
-Terminal settlement (BAL proxy, see README "Scope & simplifications"): any
-leftover position vT is settled at the last available best bid (if long,
-vT > 0) or best ask (if short, vT < 0) in the contract's own order book, in
-place of a real balancing-market clearing price we don't have data for.
+Terminal settlement (paper Eq. 1's Cbal term, §2.2): any leftover position vT
+is settled at the contract's real balancing-market price -- pfeed (if long,
+vT > 0) or ptake (if short, vT < 0) -- sourced from the synthetic third-market
+dataset in data/{split}/balancing_prices.csv (src/balancing.py). This is a
+genuinely independent price series, not derived from this contract's own CID
+order book. If no BAL data is supplied (`ptake`/`pfeed` left None), falls back
+to settling at the contract's own last best bid/ask as a degraded proxy.
 
 State: assembled per Table 1 (paper §4.5); see `FEATURE_NAMES` for the exact
-order. A few Table 1 rows reference genuine forecasts (pfeed/ptake, "average pb
-forecast") that require data we don't have -- these are proxied by the causal
-VWAP-BENCH value already computed for the DAM stage (src/dam_policy.py), which
-is documented there and reused here without recomputation (passed in via
-`vwap_hat` / `neighbor_bench`).
+order. A few rows reference forecasts a live trader wouldn't have yet (the CID
+vwap forecast, and BAL pfeed/ptake forecasts) -- these use only *past*
+contracts' realized prices via causal trailing benchmarks (src.dam_policy's
+VWAP-BENCH `vwap_hat`, src.balancing's `bal_bench`/`rolling_neighbor_ptake`),
+never the current contract's own (future) settlement values.
 """
 
 from __future__ import annotations
@@ -61,7 +64,7 @@ FEATURE_NAMES = [
     "spread_bid_vs_pdam",
     "spread_bid_vs_pb_forecast",
     "spread_bid_vs_pfeed_forecast",
-    "spread_bid_vs_neighbor_bench",
+    "spread_bid_vs_neighbor_ptake_bench",
     *[f"lag_bid_spread_t-{k}" for k in range(1, _LAG_STEPS + 1)],
     "best_bid_qty",
     "n_bid_orders",
@@ -70,7 +73,7 @@ FEATURE_NAMES = [
     "q1_ask_price",
     "q2_ask_price",
     "q3_ask_price",
-    "spread_ask_vs_neighbor_bench",
+    "spread_ask_vs_neighbor_ptake_bench",
     "best_ask_qty",
     "total_ask_qty",
     "n_ask_orders",
@@ -137,22 +140,39 @@ class ContractCIDEnv:
         v0: float,
         c_dam: float,
         vwap_hat: float | None = None,
-        neighbor_bench: float | None = None,
+        pfeed_bench: float | None = None,
+        ptake_bench: float | None = None,
+        neighbor_ptake_bench: float | None = None,
+        ptake: float | None = None,
+        pfeed: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Begin a new contract episode.
 
         Args:
-            cim_contract   : all CIM rows for a single delivery_start.
-            pdam           : DAM price proxy for this contract (src.dam_policy).
-            v0             : opened DAM position (MWh, +long/-short).
-            c_dam          : DAM cash flow for v0 (Eq. 1).
-            vwap_hat       : VWAP-BENCH forecast used for the DAM rule; reused
-                             here as the "average forecast" state features'
-                             proxy. Falls back to pdam if None.
-            neighbor_bench : trailing neighbouring-hour price bench, proxy for
-                             the paper's rolling ptake feature. Falls back to
-                             pdam if None.
+            cim_contract         : all CIM rows for a single delivery_start.
+            pdam                 : DAM price proxy for this contract (src.dam_policy).
+            v0                   : opened DAM position (MWh, +long/-short).
+            c_dam                : DAM cash flow for v0 (Eq. 1).
+            vwap_hat             : causal VWAP-BENCH forecast (src.dam_policy),
+                                   used for the "average forecast"/"average pb
+                                   forecast" state features. Falls back to pdam.
+            pfeed_bench          : causal trailing-average pfeed (src.balancing.
+                                   bal_bench), used for the "pfeed forecast"
+                                   state feature and the Eq. (10) BUY threshold.
+                                   Falls back to pdam.
+            ptake_bench          : causal trailing-average ptake (src.balancing.
+                                   bal_bench), used for the Eq. (10) SELL
+                                   threshold. Falls back to pdam.
+            neighbor_ptake_bench : causal rolling neighbour-hour ptake average
+                                   (src.balancing.rolling_neighbor_ptake), paper
+                                   Table 1's "1/6 sum" feature. Falls back to pdam.
+            ptake, pfeed         : REAL settlement prices for *this* contract
+                                   (src.balancing.contract_bal_prices) -- used
+                                   only for terminal BAL settlement, never
+                                   exposed mid-episode. Falls back to settling
+                                   at this contract's own last best ask/bid if
+                                   either is None (no BAL data available).
         """
         self._ticks, self._books = self._build_books(cim_contract)
         if not self._ticks:
@@ -163,7 +183,11 @@ class ContractCIDEnv:
 
         self.pdam = pdam
         self.vwap_hat = vwap_hat if vwap_hat is not None else pdam
-        self.neighbor_bench = neighbor_bench if neighbor_bench is not None else pdam
+        self.pfeed_bench = pfeed_bench if pfeed_bench is not None else pdam
+        self.ptake_bench = ptake_bench if ptake_bench is not None else pdam
+        self.neighbor_ptake_bench = neighbor_ptake_bench if neighbor_ptake_bench is not None else pdam
+        self._ptake = ptake
+        self._pfeed = pfeed
 
         self.vt = v0
         self.pnl = c_dam
@@ -237,9 +261,13 @@ class ContractCIDEnv:
         if done:
             leftover = self.vt
             if leftover > 0.0:
-                bal_cash = leftover * self._last_best_bid
+                # Long leftover -> feed excess energy back, receive pfeed (Eq. 1: Cbal = vT*pfeed).
+                settle_price = self._pfeed if self._pfeed is not None else self._last_best_bid
+                bal_cash = leftover * settle_price
             elif leftover < 0.0:
-                bal_cash = leftover * self._last_best_ask
+                # Short leftover -> take energy to cover, pay ptake (Eq. 1: Cbal = vT*ptake).
+                settle_price = self._ptake if self._ptake is not None else self._last_best_ask
+                bal_cash = leftover * settle_price
             else:
                 bal_cash = 0.0
             self.pnl += bal_cash
@@ -265,6 +293,8 @@ class ContractCIDEnv:
             "pb_high": self.pb_high,
             "pa_low": self.pa_low,
             "vwap_hat": self.vwap_hat,
+            "pfeed_bench": self.pfeed_bench,
+            "ptake_bench": self.ptake_bench,
             "vt": self.vt,
             "cum_bought": self.cum_bought,
             "cum_sold": self.cum_sold,
@@ -316,8 +346,8 @@ class ContractCIDEnv:
             _clip(((pa_t + pb_t) / 2 - self.vwap_hat) / PRICE_SCALE),
             _clip((pb_t - self.pdam) / PRICE_SCALE),
             _clip((pb_t - self.vwap_hat) / PRICE_SCALE),
-            _clip((pb_t - self.vwap_hat) / PRICE_SCALE),
-            _clip((pb_t - self.neighbor_bench) / PRICE_SCALE),
+            _clip((pb_t - self.pfeed_bench) / PRICE_SCALE),
+            _clip((pb_t - self.neighbor_ptake_bench) / PRICE_SCALE),
             *lag_spreads,
             _clip(best_bid_qty / QTY_SCALE, 0.0, 1.0),
             _clip(n_bid_orders / 10.0, 0.0, 1.0),
@@ -326,7 +356,7 @@ class ContractCIDEnv:
             _clip(float(np.quantile(ask_prices, 0.25)) / PRICE_SCALE, 0.0, 1.0),
             _clip(float(np.quantile(ask_prices, 0.50)) / PRICE_SCALE, 0.0, 1.0),
             _clip(float(np.quantile(ask_prices, 0.75)) / PRICE_SCALE, 0.0, 1.0),
-            _clip((pa_t - self.neighbor_bench) / PRICE_SCALE),
+            _clip((pa_t - self.neighbor_ptake_bench) / PRICE_SCALE),
             _clip(best_ask_qty / QTY_SCALE, 0.0, 1.0),
             _clip(total_ask_qty / (QTY_SCALE * 5), 0.0, 1.0),
             _clip(n_ask_orders / 10.0, 0.0, 1.0),

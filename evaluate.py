@@ -20,6 +20,7 @@ import numpy as np
 import torch
 
 from src import parallel_worker
+from src.balancing import load_split_balancing
 from src.contracts import list_contracts
 from src.data_loader import load_all
 from src.eval_plots import ContractResult, save_all_plots
@@ -72,13 +73,14 @@ def main() -> None:
 
     print(f"Loading {args.split} data...")
     cim, auc = load_all(split=args.split)
+    bal = load_split_balancing(split=args.split)
     contracts = list_contracts(cim, auc, days=args.days)
     print(f"{len(contracts)} contracts.")
 
     example_idx = sorted(set([0, len(contracts) // 2, len(contracts) - 1]))
     example_set = {contracts[i] for i in example_idx if 0 <= i < len(contracts)}
 
-    parallel_worker.init_globals(cim, auc)
+    parallel_worker.init_globals(cim, auc, bal)
 
     state_dict_np = {k: v.numpy() for k, v in ckpt["state_dict"].items()}
     tasks = [{

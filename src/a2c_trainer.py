@@ -65,17 +65,16 @@ def clone_rule_within_cid(ctx: dict) -> int:
 
 def clone_rule_cid_bal(ctx: dict) -> int:
     """
-    Worker 3, Eq. (10) adapted: arbitrage between the CID and the balancing
-    market. No BAL dataset exists (see README "Scope & simplifications"), so
-    pfeed/ptake are proxied by the same causal VWAP-BENCH value (`vwap_hat`)
-    used elsewhere for BAL-adjacent quantities -- unlike the session extremes
-    used by clone_rule_within_cid, this must stay causal (no session
-    lookahead), which VWAP-BENCH already satisfies by construction.
+    Worker 3, Eq. (10): arbitrage between the CID and the balancing market,
+    using the synthetic third-market dataset (data/{split}/balancing_prices.csv,
+    src/balancing.py). `pfeed_bench`/`ptake_bench` are *causal* trailing
+    averages of past contracts' realized settlement prices (src.balancing.
+    bal_bench) -- unlike the session extremes used by clone_rule_within_cid,
+    this must stay causal (no lookahead into this contract's own settlement).
     """
-    bal_proxy = ctx["vwap_hat"]
-    if ctx["pa_t"] < bal_proxy and ctx["vt"] < ctx["vmax"] and ctx["cum_bought"] < ctx["qhigh"]:
+    if ctx["pa_t"] < ctx["pfeed_bench"] and ctx["vt"] < ctx["vmax"] and ctx["cum_bought"] < ctx["qhigh"]:
         return BUY
-    if ctx["pb_t"] > bal_proxy and ctx["vt"] > ctx["vmin"] and ctx["cum_sold"] < ctx["qhigh"]:
+    if ctx["pb_t"] > ctx["ptake_bench"] and ctx["vt"] > ctx["vmin"] and ctx["cum_sold"] < ctx["qhigh"]:
         return SELL
     return HOLD
 

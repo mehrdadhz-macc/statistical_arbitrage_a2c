@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 from src import parallel_worker
+from src.balancing import load_split_balancing
 from src.contracts import list_contracts
 from src.data_loader import load_all
 from src.parallel_worker import eval_episode_worker
@@ -42,10 +43,11 @@ def main() -> None:
 
     print("Loading test data...")
     cim, auc = load_all(split="test")
+    bal = load_split_balancing(split="test")
     contracts = list_contracts(cim, auc, days=args.days)
     print(f"{len(contracts)} test contracts.")
 
-    parallel_worker.init_globals(cim, auc)
+    parallel_worker.init_globals(cim, auc, bal)
 
     state_dict_np = {k: v.numpy() for k, v in ckpt["state_dict"].items()}
     tasks = [{

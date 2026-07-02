@@ -4,15 +4,18 @@ Replication of the reinforcement-learning core of **Demir, Kok & Paterakis (2023
 *Statistical arbitrage trading across electricity markets using advantage actor-critic methods*
 (Sustainable Energy, Grids and Networks 34, 101023).
 
-The paper trades across the day-ahead market (DAM), continuous intraday market (CID) and
-balancing market (BAL): a rule-based agent opens a position on the DAM, and a synchronous
-advantage actor-critic (A2C) agent then manages that position on the CID tick by tick, closing
-any leftover position on the BAL. One episode covers a single hourly delivery contract's CID
-trading session; the agent chooses BUY / SELL / HOLD at every order-book revision.
+The paper trades across three markets — the day-ahead market (DAM), continuous intraday market
+(CID) and balancing market (BAL): a rule-based agent opens a position on the DAM, and a
+synchronous advantage actor-critic (A2C) agent then manages that position on the CID tick by
+tick, closing any leftover position on the BAL. One episode covers a single hourly delivery
+contract's CID trading session; the agent chooses BUY / SELL / HOLD at every order-book
+revision.
 
 This project is a sibling of [`reinforce_threshold_policy`](../reinforce_threshold_policy)
 (Bertrand & Papavasiliou 2020) and **reuses its synthetic CIM order-book + D-1 auction dataset
-as-is** — same schema, same data-loading code, same train/test split. See
+as-is** (same schema, same data-loading code, same train/test split) and adds a **third,
+independently-generated synthetic dataset for the balancing market** so the DAM-CID-BAL
+structure is real rather than degenerating to two markets. See
 ["Scope & simplifications"](#scope--simplifications) below for exactly what was and wasn't
 replicated.
 
@@ -24,30 +27,35 @@ project_root/
     train/
       intraday_auction_curves.csv   # D-1 auction curves (Jan-Jun 2023, seed=42) — copied, not tracked
       cim_order_book.csv            # CIM order book — copied, not tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated here, tracked
     test/
       intraday_auction_curves.csv   # D-1 auction curves (Aug 2023, seed=123) — copied, not tracked
       cim_order_book.csv            # CIM order book — copied, not tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated here, tracked
 
   scripts/
     data_generation/
       generate_train_data.py        # synthesise training CIM + auction data (unchanged from sibling)
       generate_test_data.py         # synthesise test CIM + auction data (unchanged from sibling)
+      generate_train_balancing.py   # synthesise training BAL take/feed prices (new third market)
+      generate_test_balancing.py    # synthesise test BAL take/feed prices (new third market)
     data_plots/
       plot_auction_curve.py         # visualise D-1 auction MID curve + regimes
     check_data.py                   # validate a dataset
 
   src/
     data_loader.py       # load_all(), build_day_index(), day_auction_mids() — unchanged from sibling
-    contracts.py          # list_contracts() — flattens build_day_index() into one episode per delivery hour
-    dam_policy.py           # pdam / VWAP-BENCH proxies + rule-based DAM position opener
-    rewards.py                # buy/sell/hold reward functions (Eqs. 5-7)
-    environment.py              # ContractCIDEnv — one CID trading session per episode
-    actor_critic.py                # ActorCriticNet — two-headed shared network (Fig. 4, §4.6)
-    a2c_trainer.py                    # A2CAgent, epsilon/gamma schedules, behaviour-cloning rules (Eqs. 8-11)
-    parallel_worker.py                  # fork-based synchronous multi-worker train/eval episode functions
-    benchmarks.py                         # HOLD and PRE-BA (Eq. 14) rule-based baselines
-    training_logger.py                      # per-round metrics + training plots
-    eval_plots.py                             # six diagnostic evaluation figures
+    balancing.py           # load_split_balancing(), bal_bench(), rolling_neighbor_ptake() — BAL data access
+    contracts.py             # list_contracts() — flattens build_day_index() into one episode per delivery hour
+    dam_policy.py               # pdam / VWAP-BENCH proxies + rule-based DAM position opener
+    rewards.py                    # buy/sell/hold reward functions (Eqs. 5-7)
+    environment.py                  # ContractCIDEnv — one CID trading session per episode
+    actor_critic.py                    # ActorCriticNet — two-headed shared network (Fig. 4, §4.6)
+    a2c_trainer.py                        # A2CAgent, epsilon/gamma schedules, behaviour-cloning rules (Eqs. 8-11)
+    parallel_worker.py                      # fork-based synchronous multi-worker train/eval episode functions
+    benchmarks.py                             # HOLD and PRE-BA (Eq. 14) rule-based baselines
+    training_logger.py                          # per-round metrics + training plots
+    eval_plots.py                                 # six diagnostic evaluation figures
 
   outputs/
     runs/                # timestamped run directories (model.pt, hparams.txt,
@@ -68,10 +76,11 @@ venv/bin/pip install numpy pandas torch matplotlib scipy
 
 ## Data
 
-The `data/` CSVs here are copied verbatim from `reinforce_threshold_policy/data/` — same CIM
-order book (5 price levels/side, 1-minute ticks) and D-1 auction curves (10 levels/side),
-same 200-day train / 31-day test split. See that project's `scripts/data_generation/` for how
-the data was generated, or regenerate it locally:
+Two of the three markets' data (`cim_order_book.csv`, `intraday_auction_curves.csv`) are copied
+verbatim from `reinforce_threshold_policy/data/` — same CIM order book (5 price levels/side,
+1-minute ticks) and D-1 auction curves (10 levels/side), same 200-day train / 31-day test split.
+See that project's `scripts/data_generation/` for how they were generated, or regenerate them
+locally:
 
 ```bash
 venv/bin/python3 scripts/data_generation/generate_train_data.py
@@ -79,6 +88,18 @@ venv/bin/python3 scripts/data_generation/generate_test_data.py
 venv/bin/python3 scripts/check_data.py train
 venv/bin/python3 scripts/check_data.py test
 ```
+
+The third market (`balancing_prices.csv`) is new to this project — quarter-hourly BAL take/feed
+prices, generated so their `delivery_start` values line up exactly with the existing CIM/auction
+data (same day set, same diurnal base price pattern, independent noise draws):
+
+```bash
+venv/bin/python3 scripts/data_generation/generate_train_balancing.py
+venv/bin/python3 scripts/data_generation/generate_test_balancing.py
+```
+
+Unlike the multi-GB CIM order books, `balancing_prices.csv` is small (~1MB) and **is tracked in
+git** — no regeneration needed after cloning.
 
 ## Train
 
@@ -159,10 +180,17 @@ implement:
     price for that delivery hour. See `src/dam_policy.py` for the full reasoning, including why
     "realized CID price" is itself approximated by the order-book mid-price time-average (our
     synthetic data records resting quotes, not an executed trade tape).
-- **A real balancing-market (BAL) dataset.** Only CIM (continuous intraday) and D-1 auction data
-  exist. Any leftover position at the end of a CID session is settled at the last available best
-  bid (if long) / best ask (if short) in that contract's own order book — a "closeout at final
-  market price" proxy for a true BAL clearing price (`src/environment.py`).
+- **Real (i.e. historical) balancing-market prices.** `data/{train,test}/balancing_prices.csv` is
+  a *synthesized* third market — quarter-hourly take/feed prices sharing the same diurnal price
+  pattern as the auction/CIM generators but drawn independently, with an asymmetric imbalance
+  premium/discount (`take_price > reference > feed_price`, see
+  `scripts/data_generation/generate_*_balancing.py`). It is not derived from a contract's own CID
+  session, so BAL settlement (`src/environment.py`'s terminal branch) is genuinely a third,
+  independent price series — it's just not backed by real ENTSO-E/Scholt Energy balancing data
+  the way the paper's is. Mid-episode BAL-referencing state features and the Eq. (10)
+  behaviour-cloning rule only ever see *causal* trailing benchmarks of past contracts'
+  settlement prices (`src/balancing.py`'s `bal_bench`/`rolling_neighbor_ptake`), never the
+  current contract's own (future) settlement — that would be lookahead.
 - **Monthly rolling retraining (§5.4.2).** The paper retrains every month on a rolling window;
   this project uses a single fixed 200-day train / 31-day test split, trained once, consistent
   with `reinforce_threshold_policy`'s simpler setup.

@@ -28,6 +28,7 @@ import torch
 from src import dam_policy, parallel_worker
 from src.a2c_trainer import A2CAgent, epsilon_schedule, gamma_schedule
 from src.contracts import list_contracts
+from src.balancing import load_split_balancing
 from src.data_loader import load_all
 from src.parallel_worker import train_episode_worker
 from src.training_logger import TrainingLogger
@@ -122,6 +123,7 @@ def main() -> None:
 
     print("Loading training data...")
     cim, auc = load_all(split="train")
+    bal = load_split_balancing(split="train")
     contracts = list_contracts(cim, auc, days=args.days)
     print(f"{len(contracts)} training contracts across {args.days} days.")
 
@@ -129,8 +131,8 @@ def main() -> None:
     agent = A2CAgent(lr=args.lr, n1=args.n1, n2=args.n2)
     _write_hparams(run_dir / "hparams.txt", args, agent, len(contracts))
 
-    print("Precomputing VWAP-BENCH and grouping order book by contract (one-time)...")
-    parallel_worker.init_globals(cim, auc)
+    print("Precomputing VWAP-BENCH/BAL-BENCH and grouping order book by contract (one-time)...")
+    parallel_worker.init_globals(cim, auc, bal)
 
     pool = None
     if args.workers > 1:
