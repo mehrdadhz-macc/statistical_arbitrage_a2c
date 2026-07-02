@@ -27,11 +27,11 @@ project_root/
     train/
       intraday_auction_curves.csv   # D-1 auction curves (Jan-Jun 2023, seed=42) — copied, not tracked
       cim_order_book.csv            # CIM order book — copied, not tracked
-      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated here, tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated locally, not tracked
     test/
       intraday_auction_curves.csv   # D-1 auction curves (Aug 2023, seed=123) — copied, not tracked
       cim_order_book.csv            # CIM order book — copied, not tracked
-      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated here, tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated locally, not tracked
 
   scripts/
     data_generation/
@@ -98,8 +98,9 @@ venv/bin/python3 scripts/data_generation/generate_train_balancing.py
 venv/bin/python3 scripts/data_generation/generate_test_balancing.py
 ```
 
-Unlike the multi-GB CIM order books, `balancing_prices.csv` is small (~1MB) and **is tracked in
-git** — no regeneration needed after cloning.
+No `.csv` files are tracked in git (see `.gitignore`) — after cloning, run all four generation
+scripts above (or copy `data/` from `reinforce_threshold_policy` plus regenerate the BAL files)
+before training or evaluating.
 
 ## Train
 

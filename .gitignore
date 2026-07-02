@@ -16,11 +16,8 @@ build/
 # Claude Code local settings
 .claude/
 
-# Data files (copied from reinforce_threshold_policy, not tracked)
-data/train/cim_order_book.csv
-data/test/cim_order_book.csv
-data/train/intraday_auction_curves.csv
-data/test/intraday_auction_curves.csv
+# Data files -- none are tracked; all generated/copied locally instead
+*.csv
 
 # Logs
 outputs/logs/
