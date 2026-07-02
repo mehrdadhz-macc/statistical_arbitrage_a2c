@@ -18,7 +18,13 @@ of the order book (paper §4.3: "the agent buys qa_t <= vmax - vt MWh"), capped
 by remaining position headroom and remaining qhigh budget -- not a multi-level
 depth walk.
 
-Reward: src.rewards.{buy_reward,sell_reward,hold_reward} (Eqs. 5-7).
+Reward: src.rewards.{buy_reward,sell_reward,hold_reward} (Eqs. 5-7). Rewards never
+reference cost or quantity, so TRADING_COST_EUR_MWH below affects PnL/reporting
+only, never the reward signal used for training.
+
+PnL (Eq. 1): Cdam (src.dam_policy) + Ccid (per-tick trade cash flow, net of
+TRADING_COST_EUR_MWH -- Eq. 1's TC term, EUR 0.116/MWh on every CID trade,
+both sides) + Cbal (terminal settlement, below).
 
 Terminal settlement (paper Eq. 1's Cbal term, §2.2): any leftover position vT
 is settled at the contract's real balancing-market price -- pfeed (if long,
@@ -56,6 +62,12 @@ _LAG_STEPS = 8
 # min/max pre-pass).
 PRICE_SCALE = 100.0   # EUR/MWh -- typical intraday price spread magnitude
 QTY_SCALE = 20.0      # MWh -- typical per-level order-book quantity
+
+# Eq. (1)'s TC term: market-operator trading cost, charged per MWh traded on
+# the CID (both buy and sell sides). Deducted from PnL only -- the reward
+# functions (Eqs. 5-7) never reference cost or quantity, so this does not
+# affect training, only PnL/Table-7-style reporting.
+TRADING_COST_EUR_MWH = 0.116
 
 FEATURE_NAMES = [
     "minutes_to_end",
@@ -189,6 +201,7 @@ class ContractCIDEnv:
         self._ptake = ptake
         self._pfeed = pfeed
 
+        self.v0 = v0
         self.vt = v0
         self.pnl = c_dam
         self.cum_bought = 0.0
@@ -228,7 +241,7 @@ class ContractCIDEnv:
             qa_t = book.asks[0][1] if book.asks else 0.0
             q = max(0.0, min(qa_t, self.vmax - self.vt, self.qhigh - self.cum_bought))
             if q > 0.0:
-                cash_flow = -q * pa_t
+                cash_flow = -q * pa_t - TRADING_COST_EUR_MWH * q
                 self.vt += q
                 self.cum_bought += q
                 self.pnl += cash_flow
@@ -238,7 +251,7 @@ class ContractCIDEnv:
             qb_t = book.bids[0][1] if book.bids else 0.0
             q = max(0.0, min(qb_t, self.vt - self.vmin, self.qhigh - self.cum_sold))
             if q > 0.0:
-                cash_flow = q * pb_t
+                cash_flow = q * pb_t - TRADING_COST_EUR_MWH * q
                 self.vt -= q
                 self.cum_sold += q
                 self.pnl += cash_flow

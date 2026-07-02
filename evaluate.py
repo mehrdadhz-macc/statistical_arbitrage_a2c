@@ -113,7 +113,9 @@ def main() -> None:
             n_steps=r["n_steps"],
             traded_qty=r["traded_qty"],
             hold_pnl=r.get("hold_pnl"),
+            hold_qty=r.get("hold_qty"),
             pre_ba_pnl=r.get("pre_ba_pnl"),
+            pre_ba_qty=r.get("pre_ba_qty"),
             action_counts=r.get("action_counts"),
         )
         for r in raw_results
@@ -132,10 +134,12 @@ def main() -> None:
     _print_table7("A2C", _summary_stats(pnls, qtys))
     if all(r.hold_pnl is not None for r in results):
         hold_pnls = np.array([r.hold_pnl for r in results])
-        _print_table7("HOLD", _summary_stats(hold_pnls, np.zeros_like(hold_pnls)))
+        hold_qtys = np.array([r.hold_qty for r in results])
+        _print_table7("HOLD", _summary_stats(hold_pnls, hold_qtys))
     if args.with_pre_ba and all(r.pre_ba_pnl is not None for r in results):
         pre_ba_pnls = np.array([r.pre_ba_pnl for r in results])
-        _print_table7("PRE-BA", _summary_stats(pre_ba_pnls, qtys))
+        pre_ba_qtys = np.array([r.pre_ba_qty for r in results])
+        _print_table7("PRE-BA", _summary_stats(pre_ba_pnls, pre_ba_qtys))
 
 
 if __name__ == "__main__":

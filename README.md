@@ -122,7 +122,7 @@ Key flags:
 | `--days` | 200 | Training days |
 | `--rounds` | 100 | Synchronisation rounds (paper's `emax`) |
 | `--workers` | 8 | Synchronous workers per round (paper's `W`); total episodes = rounds x workers |
-| `--lr` | 1e-3 | Adam learning rate |
+| `--lr` | 0.003 | Adam learning rate (paper's `beta`, §5.4.2) |
 | `--n1` / `--n2` | 216 / 193 | Actor-critic hidden layer sizes (paper §5.4.2) |
 | `--vmax` / `--vmin` | 10 / -10 | Position limits (MWh) |
 | `--qhigh` | 50 | Max cumulative bought/sold quantity per contract (MWh) |
@@ -197,9 +197,40 @@ implement:
   with `reinforce_threshold_policy`'s simpler setup.
 - **The A3C benchmark.** Only A2C is implemented; HOLD and PRE-BA (Eq. 14) are included since
   they're cheap rule-based comparators evaluated the same way the paper does.
+- **The `tmax` intra-episode update horizon (Algorithm 1).** Our per-contract episodes are never
+  longer than ~1890 ticks (the last delivery hour's ~31.5h CID session at 1-minute resolution),
+  always shorter than the paper's `tmax=2906`, so the "update the global network every `tmax`
+  steps, possibly mid-episode" mechanic never actually triggers -- every worker always plays a
+  full episode to its true terminal state before its gradient is computed. This is mathematically
+  identical to the paper's algorithm in our setting, just simpler to state.
+- **The `trandom` behaviour-cloning window (Algorithm 1, lines 15-19).** The paper picks a random
+  start point within the episode: before it, the worker explores by sampling from its own policy;
+  after it, the worker clones its assigned rule. Since `tmax` exceeds our episode lengths, that
+  window would cover nearly the whole episode regardless of where it starts, so we replace it with
+  an unconditional 50/50 split between cloning and policy-sampled exploration whenever the epsilon
+  roll triggers (`src/a2c_trainer.py`'s `select_action`) -- both of the paper's non-greedy
+  behaviours stay reachable, just not tied to a specific time window.
 
 All of these are called out inline in the relevant source files (`src/dam_policy.py`,
-`src/environment.py`) as well.
+`src/environment.py`, `src/a2c_trainer.py`) as well.
+
+### Fixed during a paper-fidelity audit
+
+A systematic line-by-line check against the paper (Eqs. 1-14, Table 1, Algorithm 1, §5.4.2) found
+and fixed three real gaps beyond the deliberate scope simplifications above:
+
+- **Trading cost.** Eq. (1)'s `TC = 0.116 EUR/MWh x (total bought + total sold)` term was missing
+  entirely from the PnL calculation (`src/environment.py`). It doesn't affect training -- the
+  reward functions (Eqs. 5-7) never reference cost or quantity -- but it was inflating every
+  reported PnL, disproportionately for the more active strategies (A2C, PRE-BA) versus HOLD.
+- **Learning rate.** `train.py --lr` defaulted to `1e-3`; the paper's §5.4.2 hyperparameter is
+  `beta = 0.003`.
+- **The "Quantity" metric in Table 7.** Worked out from the paper's own numbers: HOLD's reported
+  quantity is exactly `vmax` per contract despite HOLD making zero CID trades, meaning "Quantity"
+  = `|v0|` (the DAM leg, always a full `vmax`/`vmin` position) + gross CID volume, not CID volume
+  alone. `evaluate.py` was hardcoding HOLD's quantity to `0` and incorrectly reusing A2C's traded
+  quantity when reporting PRE-BA's PT/PD stats; `src/benchmarks.py`'s `run_hold`/`run_pre_ba` now
+  track and return their own quantity, DAM leg included.
 
 ## Reference
 

@@ -104,7 +104,10 @@ def build_worker_clone_rules(n_workers: int) -> list:
     rules = [clone_rule_dam_cid, clone_rule_within_cid, clone_rule_cid_bal]
     n_extra = max(0, n_workers - len(rules))
     if n_extra > 0:
-        thresholds = np.linspace(-0.9, -0.1, n_extra)
+        # endpoint=False: n_extra evenly spaced thresholds in [-1, 0), matching
+        # the paper's half-open interval exactly (e.g. n_extra=5 -> -1.0, -0.8,
+        # -0.6, -0.4, -0.2).
+        thresholds = np.linspace(-1.0, 0.0, n_extra, endpoint=False)
         rules += [make_threshold_clone_rule(float(tau)) for tau in thresholds]
     return rules[:n_workers]
 
@@ -115,7 +118,7 @@ def build_worker_clone_rules(n_workers: int) -> list:
 class A2CAgent:
     def __init__(
         self,
-        lr: float = 1e-3,
+        lr: float = 0.003,
         n1: int = 216,
         n2: int = 193,
         state_dim: int = STATE_DIM,
@@ -143,7 +146,16 @@ class A2CAgent:
         """
         Algorithm 1, lines 11-22 (simplified: our per-contract episodes are
         short relative to the paper's tmax, so we drop the `trandom` cloning
-        *window* and simply clone with probability epsilon each step).
+        *window* -- the paper picks a random start point within the episode
+        before which it randomly explores and after which it clones; since
+        tmax exceeds our max episode length the window would cover almost
+        the whole episode regardless of where it starts, so we replace it
+        with an unconditional 50/50 split between the two behaviours whenever
+        epsilon triggers. This keeps *both* of the paper's non-greedy
+        behaviours -- behaviour cloning and genuine policy-sampled
+        exploration -- actually reachable, rather than clone_action always
+        winning (which happens if you resolve it via `clone_action or
+        dist.sample()`, since a clone action is always available).
 
         Whatever action is finally chosen -- cloned, randomly explored, or
         greedily exploited -- its log-prob/value under the *current* policy
@@ -159,7 +171,10 @@ class A2CAgent:
         if is_first_episode and clone_action is not None:
             action = clone_action
         elif rng.random() < epsilon:
-            action = clone_action if clone_action is not None else int(dist.sample().item())
+            if clone_action is not None and rng.random() < 0.5:
+                action = clone_action
+            else:
+                action = int(dist.sample().item())
         else:
             action = int(torch.argmax(probs).item())
 

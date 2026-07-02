@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--days", type=int, default=200, help="Training days (default 200)")
     p.add_argument("--rounds", type=int, default=100, help="Synchronisation rounds (paper's emax, default 100)")
     p.add_argument("--workers", type=int, default=8, help="Synchronous workers per round (paper's W, default 8)")
-    p.add_argument("--lr", type=float, default=1e-3, help="Adam learning rate")
+    p.add_argument("--lr", type=float, default=0.003, help="Adam learning rate (paper's beta, Section 5.4.2)")
     p.add_argument("--out", type=str, default=None, help="Checkpoint path (default outputs/runs/<timestamp>/model.pt)")
     p.add_argument("--seed", type=int, default=None, help="RNG seed")
     p.add_argument("--plot-dir", type=str, default=None, help="Training plot directory")

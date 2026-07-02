@@ -95,7 +95,9 @@ def _play_episode(agent: A2CAgent, env: ContractCIDEnv, state, mask, task: dict,
     clone_rule = clone_rules[task["worker_id"] % len(clone_rules)]
 
     total_reward = 0.0
-    total_traded_qty = 0.0
+    # Paper Table 7's "Quantity" includes the DAM leg (|v0|, always a full
+    # vmax/vmin position) plus gross CID volume -- see src/benchmarks.py.
+    total_traded_qty = abs(env.v0)
     n_steps = 0
     tick_records = []
     action_counts = {"HOLD": 0, "BUY": 0, "SELL": 0}
@@ -183,11 +185,11 @@ def eval_episode_worker(task: dict) -> dict:
     if task.get("with_pre_ba"):
         from src.benchmarks import run_pre_ba
         env2, state2, mask2 = _build_env_for_contract(task["delivery_start"], task["env_kwargs"])
-        result["pre_ba_pnl"] = run_pre_ba(env2, state2, mask2)
+        result["pre_ba_pnl"], result["pre_ba_qty"] = run_pre_ba(env2, state2, mask2)
 
     if task.get("with_hold"):
         from src.benchmarks import run_hold
         env3, _, _ = _build_env_for_contract(task["delivery_start"], task["env_kwargs"])
-        result["hold_pnl"] = run_hold(env3)
+        result["hold_pnl"], result["hold_qty"] = run_hold(env3)
 
     return result

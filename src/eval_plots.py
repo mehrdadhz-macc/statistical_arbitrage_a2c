@@ -30,7 +30,9 @@ class ContractResult:
     n_steps: int
     traded_qty: float
     hold_pnl: float | None = None
+    hold_qty: float | None = None
     pre_ba_pnl: float | None = None
+    pre_ba_qty: float | None = None
     action_counts: dict | None = None
 
 

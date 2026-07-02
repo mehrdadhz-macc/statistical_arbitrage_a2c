@@ -99,16 +99,19 @@ def open_dam_position(
     """
     Rule-based DAM position opener (paper Section 5.3).
 
-    Long vmax if pdam < pvwap_hat, else short vmin. If pvwap_hat is unavailable
-    (no lookback data), default to a short position of 0 (HOLD-equivalent --
-    no DAM position opened, no CID trading incentive either way).
+    Long vmax if pdam < pvwap_hat, else short vmin. The paper's rule always
+    opens a full vmax/vmin position -- there's no null case. If pvwap_hat is
+    unavailable (no lookback data yet, i.e. the first ~2 days of a split),
+    we fall back to comparing pdam against itself, which deterministically
+    resolves to a short vmin position rather than skipping the DAM leg
+    entirely; this only ever affects a couple of days per split.
 
     Returns:
         (v0, c_dam) -- opened position (MWh, +long/-short) and DAM cash flow
         (Eq. 1: c_dam = -v0 * pdam).
     """
     if pvwap_hat is None:
-        return 0.0, 0.0
+        pvwap_hat = pdam
     v0 = vmax if pdam < pvwap_hat else vmin
     c_dam = -v0 * pdam
     return v0, c_dam
