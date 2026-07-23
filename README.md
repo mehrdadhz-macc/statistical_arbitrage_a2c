@@ -1,7 +1,7 @@
 # Advantage Actor-Critic Statistical Arbitrage for Intraday Electricity Markets
 
 Replication of the reinforcement-learning core of **Demir, Kok & Paterakis (2023)** —
-*Statistical arbitrage trading across electricity markets using advantage actor-critic methods*
+[*Statistical arbitrage trading across electricity markets using advantage actor-critic methods*](https://doi.org/10.1016/j.segan.2023.101023)
 (Sustainable Energy, Grids and Networks 34, 101023).
 
 The paper trades across three markets — the day-ahead market (DAM), continuous intraday market
@@ -12,10 +12,11 @@ contract's CID trading session; the agent chooses BUY / SELL / HOLD at every ord
 revision.
 
 This project is a sibling of [`reinforce_threshold_policy`](../reinforce_threshold_policy)
-(Bertrand & Papavasiliou 2020) and **reuses its synthetic CIM order-book + D-1 auction dataset
-as-is** (same schema, same data-loading code, same train/test split) and adds a **third,
-independently-generated synthetic dataset for the balancing market** so the DAM-CID-BAL
-structure is real rather than degenerating to two markets. See
+(Bertrand & Papavasiliou 2020) and originally reused its synthetic CIM order-book + D-1 auction
+dataset as-is; `scripts/data_generation/generate_synthetic_data.py` now generates all three
+markets' data (CIM order book, D-1 auction curves, BAL take/feed prices) itself, using the same
+CSV schema and train/test split convention as that sibling project (see
+["Data"](#data) below for why it was rewritten). See
 ["Scope & simplifications"](#scope--simplifications) below for exactly what was and wasn't
 replicated.
 
@@ -25,20 +26,17 @@ replicated.
 project_root/
   data/
     train/
-      intraday_auction_curves.csv   # D-1 auction curves (Jan-Jun 2023, seed=42) — copied, not tracked
-      cim_order_book.csv            # CIM order book — copied, not tracked
-      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated locally, not tracked
+      intraday_auction_curves.csv   # D-1 auction curves (2023-01-01, 181 days, seed=42) — generated, not tracked
+      cim_order_book.csv            # CIM order book — generated, not tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated, not tracked
     test/
-      intraday_auction_curves.csv   # D-1 auction curves (Aug 2023, seed=123) — copied, not tracked
-      cim_order_book.csv            # CIM order book — copied, not tracked
-      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated locally, not tracked
+      intraday_auction_curves.csv   # D-1 auction curves (2023-08-01, 31 days, seed=123) — generated, not tracked
+      cim_order_book.csv            # CIM order book — generated, not tracked
+      balancing_prices.csv          # quarter-hourly BAL take/feed prices — generated, not tracked
 
   scripts/
     data_generation/
-      generate_train_data.py        # synthesise training CIM + auction data (unchanged from sibling)
-      generate_test_data.py         # synthesise test CIM + auction data (unchanged from sibling)
-      generate_train_balancing.py   # synthesise training BAL take/feed prices (new third market)
-      generate_test_balancing.py    # synthesise test BAL take/feed prices (new third market)
+      generate_synthetic_data.py    # synthesise CIM + auction + BAL data for one split (--split train|test)
     data_plots/
       plot_auction_curve.py         # visualise D-1 auction MID curve + regimes
     check_data.py                   # validate a dataset
@@ -76,31 +74,47 @@ venv/bin/pip install numpy pandas torch matplotlib scipy
 
 ## Data
 
-Two of the three markets' data (`cim_order_book.csv`, `intraday_auction_curves.csv`) are copied
-verbatim from `reinforce_threshold_policy/data/` — same CIM order book (5 price levels/side,
-1-minute ticks) and D-1 auction curves (10 levels/side), same 200-day train / 31-day test split.
-See that project's `scripts/data_generation/` for how they were generated, or regenerate them
-locally:
+All three markets' data (`cim_order_book.csv`, `intraday_auction_curves.csv`,
+`balancing_prices.csv`) are synthesised by a single script, one data split at a time:
 
 ```bash
-venv/bin/python3 scripts/data_generation/generate_train_data.py
-venv/bin/python3 scripts/data_generation/generate_test_data.py
+venv/bin/python3 scripts/data_generation/generate_synthetic_data.py --split train
+venv/bin/python3 scripts/data_generation/generate_synthetic_data.py --split test
 venv/bin/python3 scripts/check_data.py train
 venv/bin/python3 scripts/check_data.py test
 ```
 
-The third market (`balancing_prices.csv`) is new to this project — quarter-hourly BAL take/feed
-prices, generated so their `delivery_start` values line up exactly with the existing CIM/auction
-data (same day set, same diurnal base price pattern, independent noise draws):
+Same CSV schema, and the same train/test split convention, as `reinforce_threshold_policy`
+(5 price levels/side CIM order book at 1-minute ticks, 10-level D-1 auction curves, train =
+2023-01-01, 181 days, seed=42; test = 2023-08-01, 31 days, seed=123).
 
-```bash
-venv/bin/python3 scripts/data_generation/generate_train_balancing.py
-venv/bin/python3 scripts/data_generation/generate_test_balancing.py
-```
-
-No `.csv` files are tracked in git (see `.gitignore`) — after cloning, run all four generation
-scripts above (or copy `data/` from `reinforce_threshold_policy` plus regenerate the BAL files)
+No `.csv` files are tracked in git (see `.gitignore`) — after cloning, run both commands above
 before training or evaluating.
+
+### Why a single custom generator instead of reusing the sibling project's data
+
+This project originally copied `reinforce_threshold_policy`'s CIM/auction data verbatim and only
+generated the (new, third-market) BAL prices itself. That approach drew the auction price, every
+CID tick's price, and the BAL settlement price from **independent** noise around the same hourly
+base price. A trained A2C agent collapsed to an always-HOLD policy, and root-causing it (rolling
+out the paper's own Eq. (8)-(11) behaviour-cloning rules deterministically on real training
+contracts) showed why: even those "expert" rules produced a non-HOLD action on **less than 1%**
+of ticks, because the crossing conditions they check (`pa_t < pdam`, `pb_t > pfeed`, etc.) almost
+never held when every market's price was just independent noise around one shared mean.
+
+`generate_synthetic_data.py` instead gives every hourly contract **one continuous mean-reverting
+process** (Ornstein-Uhlenbeck / AR(1) around the hourly base price, half-life 180 minutes,
+stationary std 0.4 EUR/MWh) running from the D-1 15:00 auction gate-closure through physical
+delivery: the auction locks in a sample of it at t=0, the CID mid-price is the same process
+sampled every tick through the session, and the BAL reference is its value at the moment of
+delivery (plus the same asymmetric take/feed premium/discount as before). A pure (non-reverting)
+random walk was tried first and rejected — without mean reversion a session's price only ever
+drifts in one direction, so within a single session only BUY or only SELL ever becomes
+profitable, never both, and divergence from `pdam` grows unboundedly with session length instead
+of settling into a realistic, bounded range. The mean-reverting version was calibrated
+empirically (checked across several random seeds) so the same Eq. (8)-(11) crossing conditions
+now fire on roughly 15-20% of ticks — genuinely tradeable opportunities, without being a
+near-permanent one.
 
 ## Train
 
@@ -216,8 +230,8 @@ All of these are called out inline in the relevant source files (`src/dam_policy
 
 ### Fixed during a paper-fidelity audit
 
-A systematic line-by-line check against the paper (Eqs. 1-14, Table 1, Algorithm 1, §5.4.2) found
-and fixed three real gaps beyond the deliberate scope simplifications above:
+Repeated systematic line-by-line checks against the paper (Eqs. 1-14, Table 1, Algorithm 1,
+§5.4.2) found and fixed six real gaps beyond the deliberate scope simplifications above:
 
 - **Trading cost.** Eq. (1)'s `TC = 0.116 EUR/MWh x (total bought + total sold)` term was missing
   entirely from the PnL calculation (`src/environment.py`). It doesn't affect training -- the
@@ -225,12 +239,33 @@ and fixed three real gaps beyond the deliberate scope simplifications above:
   reported PnL, disproportionately for the more active strategies (A2C, PRE-BA) versus HOLD.
 - **Learning rate.** `train.py --lr` defaulted to `1e-3`; the paper's §5.4.2 hyperparameter is
   `beta = 0.003`.
-- **The "Quantity" metric in Table 7.** Worked out from the paper's own numbers: HOLD's reported
-  quantity is exactly `vmax` per contract despite HOLD making zero CID trades, meaning "Quantity"
-  = `|v0|` (the DAM leg, always a full `vmax`/`vmin` position) + gross CID volume, not CID volume
-  alone. `evaluate.py` was hardcoding HOLD's quantity to `0` and incorrectly reusing A2C's traded
-  quantity when reporting PRE-BA's PT/PD stats; `src/benchmarks.py`'s `run_hold`/`run_pre_ba` now
-  track and return their own quantity, DAM leg included.
+- **The "Quantity" metric in Table 7 -- DAM leg.** Worked out from the paper's own numbers: HOLD's
+  reported quantity is exactly `vmax` per contract despite HOLD making zero CID trades, meaning
+  "Quantity" = `|v0|` (the DAM leg, always a full `vmax`/`vmin` position) + CID quantity, not CID
+  quantity alone. `evaluate.py` was hardcoding HOLD's quantity to `0` and incorrectly reusing
+  A2C's traded quantity when reporting PRE-BA's PT/PD stats; `src/benchmarks.py`'s
+  `run_hold`/`run_pre_ba` now track and return their own quantity, DAM leg included.
+- **The Eq. (11) threshold clone rule used the wrong session extremes.** `make_threshold_clone_rule`
+  (workers 4-8) computed its would-be buy/sell reward via `ctx.get("pa_high", ctx["pa_low"])` and
+  `ctx.get("pb_low", ctx["pb_high"])` -- fallbacks that fired on every call, since `rule_context()`
+  never actually included `pa_high`/`pb_low`, silently substituting `pa_low` for `pa_high` and
+  `pb_high` for `pb_low`. This only corrupted the cloning *decision* for those 5 workers, not the
+  real training reward (computed independently and correctly in `ContractCIDEnv.step()`).
+  `rule_context()` now returns the real `pa_high`/`pb_low`.
+- **The "Quantity" metric in Table 7 -- gross vs. arbitraged CID volume.** The DAM-leg fix above
+  measured the CID leg as the *gross* sum of buy + sell volume (`sum(qa_t) + sum(qb_t)`). The
+  paper, however, explicitly names this quantity in its own Section 2.2 / Nomenclature: `Sigma q`,
+  "total arbitraged quantity", is defined as `min(sum(qa_t), sum(qb_t))` -- the netted,
+  round-tripped volume, which is smaller than the gross sum whenever a contract both buys and
+  sells. `src/benchmarks.py` and `src/parallel_worker.py` now use `min(cum_bought, cum_sold)` for
+  the CID leg of "Quantity" (and hence PT = PnL / Quantity) for all three agents (A2C, HOLD,
+  PRE-BA), matching the paper's own formula instead of an inferred gross convention.
+- **PRE-BA (Eq. 14) averaged in the current tick's own price.** `run_pre_ba`'s trailing 30-tick
+  window included index `t` itself (comparing `pa_t` against an average that contained `pa_t`),
+  contradicting the paper's own framing of PRE-BA as trading against "the previous best bid and
+  best ask prices" (§5.4.4). The window now looks strictly backwards, excluding the current tick
+  (falling back to a same-tick no-op comparison, i.e. HOLD, at the very first tick of a session
+  where no history yet exists).
 
 ## Reference
 

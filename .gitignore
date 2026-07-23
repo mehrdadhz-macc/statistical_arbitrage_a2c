@@ -16,6 +16,10 @@ build/
 # Claude Code local settings
 .claude/
 
+# Source paper PDF kept locally for reference, not pushed to GitHub -- see
+# the README for a link to the paper instead.
+*.pdf
+
 # Data files -- none are tracked; all generated/copied locally instead
 *.csv
 

@@ -95,9 +95,6 @@ def _play_episode(agent: A2CAgent, env: ContractCIDEnv, state, mask, task: dict,
     clone_rule = clone_rules[task["worker_id"] % len(clone_rules)]
 
     total_reward = 0.0
-    # Paper Table 7's "Quantity" includes the DAM leg (|v0|, always a full
-    # vmax/vmin position) plus gross CID volume -- see src/benchmarks.py.
-    total_traded_qty = abs(env.v0)
     n_steps = 0
     tick_records = []
     action_counts = {"HOLD": 0, "BUY": 0, "SELL": 0}
@@ -121,12 +118,16 @@ def _play_episode(agent: A2CAgent, env: ContractCIDEnv, state, mask, task: dict,
         if not greedy:
             agent.store_reward(reward)
         total_reward += reward
-        total_traded_qty += abs(info.traded_qty)
         n_steps += 1
         t += 1
         state, mask = next_state, next_mask
         if done:
             break
+    # Paper Table 7's "Quantity" = DAM leg (|v0|, always a full vmax/vmin
+    # position) + CID quantity, where the CID leg is the paper's own Eq.
+    # (2.2) definition of "total arbitraged quantity": min(total bought,
+    # total sold), not the gross sum of both sides -- see src/benchmarks.py.
+    total_traded_qty = abs(env.v0) + min(env.cum_bought, env.cum_sold)
     return total_reward, n_steps, info, tick_records, action_counts, total_traded_qty
 
 

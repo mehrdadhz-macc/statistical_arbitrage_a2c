@@ -4,7 +4,7 @@ Balancing-market (BAL) data access -- the third market in Demir et al.
 
 Real settlement (used only at episode termination, see src/environment.py):
     ptake / pfeed for a contract are the average of its four quarter-hourly
-    take/feed prices (src/scripts/data_generation/generate_*_balancing.py).
+    take/feed prices (scripts/data_generation/generate_synthetic_data.py).
     Since this is offline backtesting, the *current* contract's own realized
     ptake/pfeed are legitimately known upfront (same assumption already made
     for pa_low/pa_high/pb_low/pb_high in src/environment.py) and are used

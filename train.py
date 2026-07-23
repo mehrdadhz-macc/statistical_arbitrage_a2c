@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gamma-end", type=float, default=0.9999)
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--entropy-coef", type=float, default=0.0)
-    p.add_argument("--log-every", type=int, default=10)
+    p.add_argument("--log-every", type=int, default=1, help="Print/snapshot every N rounds (default 1 = every round)")
     return p.parse_args()
 
 
